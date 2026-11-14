@@ -17,9 +17,11 @@ import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -31,42 +33,60 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import java.math.BigDecimal
-import java.math.MathContext
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.maple.calculator.engine.CalculatorEvent
+import com.maple.calculator.engine.CalculatorState
+import com.maple.calculator.engine.Operator
+import kotlin.math.min
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge(
-            statusBarStyle = SystemBarStyle.auto(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT),
-            navigationBarStyle = SystemBarStyle.auto(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT)
+            statusBarStyle = SystemBarStyle.auto(
+                android.graphics.Color.TRANSPARENT,
+                android.graphics.Color.TRANSPARENT
+            ),
+            navigationBarStyle = SystemBarStyle.auto(
+                android.graphics.Color.TRANSPARENT,
+                android.graphics.Color.TRANSPARENT
+            )
         )
         setContent {
+            val calculatorViewModel: CalculatorViewModel = viewModel()
+            val state by calculatorViewModel.uiState.collectAsState()
+            val onEvent = remember(calculatorViewModel) {
+                { event: CalculatorEvent -> calculatorViewModel.onEvent(event) }
+            }
             CalculatorTheme {
-                CalculatorScreen()
+                CalculatorScreen(state = state, onEvent = onEvent)
             }
         }
     }
@@ -107,235 +127,43 @@ fun CalculatorTheme(content: @Composable () -> Unit) {
 }
 
 @Composable
-fun CalculatorScreen() {
-    var tokens by remember { mutableStateOf(emptyList<String>()) }
-    var entry by remember { mutableStateOf("0") }
-    var expectingOperand by remember { mutableStateOf(false) }
-    var justEvaluated by remember { mutableStateOf(false) }
-    var expressionOverride by remember { mutableStateOf<String?>(null) }
-    var error by remember { mutableStateOf(false) }
-
-    fun resetForNewEntry() {
-        tokens = emptyList()
-        entry = "0"
-        expressionOverride = null
-        error = false
-        expectingOperand = false
-        justEvaluated = false
-    }
-
-    fun inputDigit(digit: String) {
-        if (justEvaluated || error) resetForNewEntry()
-        expressionOverride = null
-        error = false
-        entry = when {
-            expectingOperand -> digit
-            entry == "0" -> digit
-            entry == "-0" -> "-$digit"
-            entry.length < 18 -> entry + digit
-            else -> entry
-        }
-        expectingOperand = false
-    }
-
-    fun inputDecimal() {
-        if (justEvaluated || error) resetForNewEntry()
-        expressionOverride = null
-        if (expectingOperand) {
-            entry = "0."
-            expectingOperand = false
-        } else if (!entry.contains('.')) {
-            entry += "."
-        }
-    }
-
-    fun inputOperator(operator: String) {
-        if (error) return
-        expressionOverride = null
-        if (justEvaluated) {
-            tokens = listOf(entry)
-            justEvaluated = false
-            expectingOperand = true
-            tokens = tokens + operator
-            return
-        }
-        if (expectingOperand) {
-            if (tokens.lastOrNull()?.let { it in listOf("+", "−", "×", "÷") } == true) {
-                tokens = tokens.dropLast(1) + operator
-            }
-        } else {
-            tokens = tokens + entry + operator
-            expectingOperand = true
-        }
-    }
-
-    fun clear() {
-        tokens = emptyList()
-        entry = "0"
-        expectingOperand = false
-        justEvaluated = false
-        expressionOverride = null
-        error = false
-    }
-
-    fun backspace() {
-        if (error || justEvaluated) {
-            clear()
-            return
-        }
-        expressionOverride = null
-        if (expectingOperand && tokens.lastOrNull()?.let { it in listOf("+", "−", "×", "÷") } == true) {
-            tokens = tokens.dropLast(1)
-            entry = tokens.lastOrNull() ?: "0"
-            if (tokens.isNotEmpty()) tokens = tokens.dropLast(1)
-            expectingOperand = false
-        } else if (!expectingOperand) {
-            entry = when {
-                entry.length > 1 -> entry.dropLast(1).let { if (it == "-" || it == "") "0" else it }
-                else -> "0"
-            }
-        }
-    }
-
-    fun toggleSign() {
-        if (error || expectingOperand) return
-        expressionOverride = null
-        entry = if (entry.startsWith('-')) entry.drop(1) else "-$entry"
-        if (entry == "-0") entry = "0"
-    }
-
-    fun percent() {
-        if (error || expectingOperand) return
-        val value = entry.toBigDecimalOrNull() ?: return
-        entry = formatNumber(value.divide(BigDecimal("100"), MathContext.DECIMAL64))
-        expressionOverride = null
-        justEvaluated = false
-    }
-
-    fun equals() {
-        if (error || expectingOperand || tokens.isEmpty()) return
-        val fullTokens = tokens + entry
-        val expression = fullTokens.joinToString(" ") + " ="
-        val result = runCatching { ExpressionParser(fullTokens).parse() }.getOrNull()
-        if (result == null) {
-            error = true
-            entry = "错误"
-            expressionOverride = expression
-        } else {
-            entry = formatNumber(result)
-            expressionOverride = expression
-            tokens = emptyList()
-            justEvaluated = true
-        }
-        expectingOperand = false
-    }
-
-    val expression = expressionOverride ?: buildString {
-        append(tokens.joinToString(" "))
-        if (!expectingOperand) {
-            if (isNotEmpty()) append(' ')
-            append(entry)
-        }
-    }
-    val displayText = if (error) "错误" else entry
-    val displayFontSize = when (displayText.length) {
-        in 0..7 -> 58.sp
-        in 8..10 -> 48.sp
-        in 11..13 -> 38.sp
-        else -> 30.sp
-    }
-    val expressionScrollState = rememberScrollState()
-    val scrollState = rememberScrollState()
-    LaunchedEffect(expression) { expressionScrollState.scrollTo(expressionScrollState.maxValue) }
-    LaunchedEffect(displayText) { scrollState.scrollTo(scrollState.maxValue) }
-
-    Scaffold(
-        modifier = Modifier.fillMaxSize(),
-        containerColor = MaterialTheme.colorScheme.surface,
-        contentWindowInsets = WindowInsets.safeDrawing
-    ) { insets ->
-        BoxWithConstraints(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(insets)
-                .padding(horizontal = 20.dp, vertical = 12.dp)
-        ) {
-            val keyHeight = ((maxHeight - 230.dp) / 5).coerceIn(48.dp, 72.dp)
-            Column(modifier = Modifier.fillMaxSize()) {
-                Column(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth()
-                        .padding(bottom = 16.dp),
-                    verticalArrangement = Arrangement.Bottom,
-                    horizontalAlignment = Alignment.End
-                ) {
-                    Text(
-                        text = expression,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .horizontalScroll(expressionScrollState),
-                        minLines = 1,
-                        maxLines = 1,
-                        overflow = TextOverflow.Clip,
-                        textAlign = TextAlign.End,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.Medium
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        text = displayText,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .horizontalScroll(scrollState),
-                        maxLines = 1,
-                        softWrap = false,
-                        overflow = TextOverflow.Clip,
-                        textAlign = TextAlign.End,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        fontSize = displayFontSize,
-                        lineHeight = displayFontSize,
-                        fontWeight = FontWeight.Light
-                    )
-                }
-
-                val rows = listOf(
-                    listOf("AC", "⌫", "%", "÷"),
-                    listOf("7", "8", "9", "×"),
-                    listOf("4", "5", "6", "−"),
-                    listOf("1", "2", "3", "+"),
-                    listOf("±", "0", ".", "=")
-                )
-                rows.forEachIndexed { rowIndex, row ->
+fun CalculatorScreen(state: CalculatorState, onEvent: (CalculatorEvent) -> Unit) {
+    val density = LocalDensity.current
+    // 限制系统字体缩放的放大倍率，避免 200% 字号撑破按键网格。
+    CompositionLocalProvider(
+        LocalDensity provides Density(
+            density = density.density,
+            fontScale = min(density.fontScale, 1.2f)
+        )
+    ) {
+        Scaffold(
+            modifier = Modifier.fillMaxSize(),
+            containerColor = MaterialTheme.colorScheme.surface,
+            contentWindowInsets = WindowInsets.safeDrawing
+        ) { insets ->
+            BoxWithConstraints(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(insets)
+                    .padding(horizontal = 16.dp, vertical = 12.dp)
+            ) {
+                val landscape = maxWidth > maxHeight
+                if (landscape) {
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        modifier = Modifier.fillMaxSize(),
+                        horizontalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
-                        row.forEach { label ->
-                            CalculatorButton(
-                                text = label,
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(keyHeight),
-                                onClick = {
-                                    when (label) {
-                                        "AC" -> clear()
-                                        "⌫" -> backspace()
-                                        "%" -> percent()
-                                        "±" -> toggleSign()
-                                        "." -> inputDecimal()
-                                        "=" -> equals()
-                                        "+", "−", "×", "÷" -> inputOperator(label)
-                                        else -> inputDigit(label)
-                                    }
-                                },
-                                emphasized = label in listOf("+", "−", "×", "÷", "="),
-                                utility = rowIndex == 0 || label == "±"
-                            )
-                        }
+                        DisplayPanel(state, Modifier.weight(0.9f).fillMaxHeight())
+                        Keypad(state, onEvent, Modifier.weight(1.1f).fillMaxHeight())
                     }
-                    if (rowIndex < rows.lastIndex) Spacer(Modifier.height(10.dp))
+                } else {
+                    Column(
+                        modifier = Modifier.fillMaxSize(),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        DisplayPanel(state, Modifier.weight(1f).fillMaxWidth())
+                        Keypad(state, onEvent, Modifier.weight(2.6f).fillMaxWidth())
+                    }
                 }
             }
         }
@@ -343,13 +171,147 @@ fun CalculatorScreen() {
 }
 
 @Composable
-private fun CalculatorButton(
-    text: String,
-    modifier: Modifier,
-    emphasized: Boolean,
-    utility: Boolean,
-    onClick: () -> Unit
-) {
+private fun DisplayPanel(state: CalculatorState, modifier: Modifier) {
+    val historyScroll = rememberScrollState()
+    LaunchedEffect(state.history) { historyScroll.scrollTo(historyScroll.maxValue) }
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.Bottom,
+        horizontalAlignment = Alignment.End
+    ) {
+        Text(
+            text = state.history,
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(historyScroll),
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Clip,
+            textAlign = TextAlign.End,
+            color = if (state.error != null) {
+                MaterialTheme.colorScheme.error
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            },
+            fontSize = 18.sp,
+            fontWeight = FontWeight.Medium
+        )
+        Spacer(Modifier.height(6.dp))
+        AdaptiveNumberText(
+            text = state.display,
+            isError = state.error != null,
+            modifier = Modifier.fillMaxWidth()
+        )
+    }
+}
+
+@Composable
+private fun AdaptiveNumberText(text: String, isError: Boolean, modifier: Modifier) {
+    val measurer = rememberTextMeasurer()
+    val color = if (isError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
+    val baseStyle = TextStyle(
+        fontWeight = FontWeight.Light,
+        fontFeatureSettings = "tnum",
+        color = color
+    )
+    BoxWithConstraints(modifier) {
+        val widthPx = constraints.maxWidth
+        val candidates = if (isError) {
+            listOf(32, 28, 24, 20)
+        } else {
+            listOf(64, 56, 48, 40, 34, 28, 24, 20)
+        }
+        val fontSize = remember(text, widthPx, isError) {
+            candidates.firstOrNull { size ->
+                measurer.measure(text, baseStyle.copy(fontSize = size.sp)).size.width <= widthPx
+            } ?: candidates.last()
+        }
+        val scrollState = rememberScrollState()
+        LaunchedEffect(text) { scrollState.scrollTo(scrollState.maxValue) }
+        Text(
+            text = text,
+            style = baseStyle.copy(fontSize = fontSize.sp, lineHeight = (fontSize * 1.1f).sp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(scrollState),
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Clip,
+            textAlign = TextAlign.End
+        )
+    }
+}
+
+private enum class KeyKind { Number, Operator, Result, Utility }
+
+private data class KeySpec(
+    val label: String,
+    val event: CalculatorEvent,
+    val kind: KeyKind
+)
+
+@Composable
+private fun Keypad(state: CalculatorState, onEvent: (CalculatorEvent) -> Unit, modifier: Modifier) {
+    val clearLabel = if (state.error == null && !state.justEvaluated && state.isEntering) "C" else "AC"
+    val rows = remember(clearLabel) {
+        listOf(
+            listOf(
+                KeySpec(clearLabel, CalculatorEvent.Clear, KeyKind.Utility),
+                KeySpec("⌫", CalculatorEvent.Backspace, KeyKind.Utility),
+                KeySpec("%", CalculatorEvent.Percent, KeyKind.Utility),
+                KeySpec("÷", CalculatorEvent.OperatorPressed(Operator.DIVIDE), KeyKind.Operator)
+            ),
+            listOf(
+                KeySpec("7", CalculatorEvent.Digit('7'), KeyKind.Number),
+                KeySpec("8", CalculatorEvent.Digit('8'), KeyKind.Number),
+                KeySpec("9", CalculatorEvent.Digit('9'), KeyKind.Number),
+                KeySpec("×", CalculatorEvent.OperatorPressed(Operator.MULTIPLY), KeyKind.Operator)
+            ),
+            listOf(
+                KeySpec("4", CalculatorEvent.Digit('4'), KeyKind.Number),
+                KeySpec("5", CalculatorEvent.Digit('5'), KeyKind.Number),
+                KeySpec("6", CalculatorEvent.Digit('6'), KeyKind.Number),
+                KeySpec("−", CalculatorEvent.OperatorPressed(Operator.SUBTRACT), KeyKind.Operator)
+            ),
+            listOf(
+                KeySpec("1", CalculatorEvent.Digit('1'), KeyKind.Number),
+                KeySpec("2", CalculatorEvent.Digit('2'), KeyKind.Number),
+                KeySpec("3", CalculatorEvent.Digit('3'), KeyKind.Number),
+                KeySpec("+", CalculatorEvent.OperatorPressed(Operator.ADD), KeyKind.Operator)
+            ),
+            listOf(
+                KeySpec("±", CalculatorEvent.ToggleSign, KeyKind.Utility),
+                KeySpec("0", CalculatorEvent.Digit('0'), KeyKind.Number),
+                KeySpec(".", CalculatorEvent.DecimalPoint, KeyKind.Number),
+                KeySpec("=", CalculatorEvent.Equals, KeyKind.Result)
+            )
+        )
+    }
+    Column(modifier = modifier) {
+        rows.forEachIndexed { index, row ->
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                row.forEach { spec ->
+                    CalculatorKey(
+                        spec = spec,
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight(),
+                        onEvent = onEvent
+                    )
+                }
+            }
+            if (index < rows.lastIndex) Spacer(Modifier.height(8.dp))
+        }
+    }
+}
+
+@Composable
+private fun CalculatorKey(spec: KeySpec, modifier: Modifier, onEvent: (CalculatorEvent) -> Unit) {
     val interactionSource = remember { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
     val scale by animateFloatAsState(
@@ -359,17 +321,17 @@ private fun CalculatorButton(
     )
     val view = LocalView.current
     val colors = MaterialTheme.colorScheme
-    val container = when {
-        text == "=" -> colors.primary
-        emphasized -> colors.primaryContainer
-        utility -> colors.tertiaryContainer
-        else -> colors.secondaryContainer
+    val container = when (spec.kind) {
+        KeyKind.Result -> colors.primary
+        KeyKind.Operator -> colors.primaryContainer
+        KeyKind.Utility -> colors.tertiaryContainer
+        KeyKind.Number -> colors.secondaryContainer
     }
-    val content = when {
-        text == "=" -> colors.onPrimary
-        emphasized -> colors.onPrimaryContainer
-        utility -> colors.onTertiaryContainer
-        else -> colors.onSecondaryContainer
+    val content = when (spec.kind) {
+        KeyKind.Result -> colors.onPrimary
+        KeyKind.Operator -> colors.onPrimaryContainer
+        KeyKind.Utility -> colors.onTertiaryContainer
+        KeyKind.Number -> colors.onSecondaryContainer
     }
 
     FilledTonalButton(
@@ -381,7 +343,7 @@ private fun CalculatorButton(
                     HapticFeedbackConstants.VIRTUAL_KEY
                 }
             )
-            onClick()
+            onEvent(spec.event)
         },
         modifier = modifier.graphicsLayer { scaleX = scale; scaleY = scale },
         shape = RoundedCornerShape(22.dp),
@@ -391,63 +353,22 @@ private fun CalculatorButton(
             contentColor = content
         ),
         elevation = ButtonDefaults.filledTonalButtonElevation(
-            defaultElevation = if (emphasized) 1.dp else 0.dp,
+            defaultElevation = if (spec.kind == KeyKind.Operator || spec.kind == KeyKind.Result) 1.dp else 0.dp,
             pressedElevation = 0.dp
         ),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)
+        contentPadding = PaddingValues(0.dp)
     ) {
         Text(
-            text = text,
-            fontSize = if (text == "AC" || text == "⌫") 20.sp else 25.sp,
-            fontWeight = if (emphasized) FontWeight.SemiBold else FontWeight.Medium,
+            text = spec.label,
+            fontSize = if (spec.label == "AC" || spec.label == "C") 18.sp else if (spec.label == "⌫") 20.sp else 24.sp,
+            fontWeight = if (spec.kind == KeyKind.Operator || spec.kind == KeyKind.Result) {
+                FontWeight.SemiBold
+            } else {
+                FontWeight.Medium
+            },
+            fontFamily = FontFamily.Default,
             maxLines = 1,
             color = content
         )
-    }
-}
-
-private fun formatNumber(value: BigDecimal): String {
-    val normalized = value.stripTrailingZeros()
-    if (normalized.precision() > 16 || normalized.scale() < -8) {
-        return normalized.round(MathContext(12)).stripTrailingZeros().toPlainString()
-    }
-    return normalized.toPlainString().ifEmpty { "0" }
-}
-
-private class ExpressionParser(private val tokens: List<String>) {
-    private var position = 0
-
-    fun parse(): BigDecimal {
-        val value = parseExpression(0)
-        if (position != tokens.size) error("Unexpected token")
-        return value
-    }
-
-    private fun parseExpression(minPrecedence: Int): BigDecimal {
-        var left = parseValue()
-        while (position < tokens.size) {
-            val operator = tokens[position]
-            val precedence = when (operator) {
-                "+", "−" -> 1
-                "×", "÷" -> 2
-                else -> break
-            }
-            if (precedence < minPrecedence) break
-            position++
-            val right = parseExpression(precedence + 1)
-            left = when (operator) {
-                "+" -> left.add(right, MathContext.DECIMAL64)
-                "−" -> left.subtract(right, MathContext.DECIMAL64)
-                "×" -> left.multiply(right, MathContext.DECIMAL64)
-                "÷" -> left.divide(right, MathContext.DECIMAL64)
-                else -> error("Unknown operator")
-            }
-        }
-        return left
-    }
-
-    private fun parseValue(): BigDecimal {
-        val token = tokens.getOrNull(position++) ?: error("Missing value")
-        return token.toBigDecimalOrNull() ?: error("Invalid number")
     }
 }
