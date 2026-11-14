@@ -6,12 +6,11 @@
         android:icon="@android:drawable/ic_menu_manage"
         android:label="MD3 Calculator"
         android:roundIcon="@android:drawable/ic_menu_manage"
-        android:supportsRtl="true"
-        android:theme="@android:style/Theme.Material.DayNight.NoActionBar">
+        android:supportsRtl="true">
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:theme="@android:style/Theme.Material.DayNight.NoActionBar">
+            android:theme="@android:style/Theme.NoTitleBar.Fullscreen">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
